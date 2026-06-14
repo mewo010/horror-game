@@ -26,14 +26,15 @@ function getAlivePlayers(room) {
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
-  socket.on('create_room', () => {
+  socket.on('create_room', (name) => {
     const code = generateRoomCode();
     socket.join(code);
     rooms[code] = {
       id: code,
       host: socket.id,
+      started: false,
       players: {
-        [socket.id]: { id: socket.id, x: 1.5, z: 1.5, yaw: 0, pitch: 0, alive: true, health: 100, color: Math.random() * 0xffffff }
+        [socket.id]: { id: socket.id, name: (name || 'PLAYER').slice(0, 18), x: 1.5, z: 1.5, yaw: 0, pitch: 0, alive: true, health: 100, color: Math.random() * 0xffffff }
       },
       pieces: [true, true, true, true],
       piecesCollected: 0,
@@ -43,20 +44,30 @@ io.on('connection', (socket) => {
     socket.emit('room_created', code);
     socket.emit('role', 'host');
     io.to(code).emit('update_players', rooms[code].players);
+    io.to(code).emit('lobby_state', rooms[code].players);
   });
 
-  socket.on('join_room', (code) => {
+  socket.on('join_room', (code, name) => {
     code = code.toUpperCase();
-    if (rooms[code] && !rooms[code].finaleTriggered) {
+    if (rooms[code] && !rooms[code].finaleTriggered && !rooms[code].started) {
       socket.join(code);
-      rooms[code].players[socket.id] = { id: socket.id, x: 1.5, z: 1.5, yaw: 0, pitch: 0, alive: true, health: 100, color: Math.random() * 0xffffff };
+      rooms[code].players[socket.id] = { id: socket.id, name: (name || 'PLAYER').slice(0, 18), x: 1.5, z: 1.5, yaw: 0, pitch: 0, alive: true, health: 100, color: Math.random() * 0xffffff };
       socket.emit('room_joined', code);
       socket.emit('role', 'client');
       socket.emit('update_pieces', rooms[code].pieces, rooms[code].piecesCollected);
       io.to(code).emit('update_players', rooms[code].players);
+      io.to(code).emit('lobby_state', rooms[code].players);
     } else {
-      socket.emit('error', 'Room not found or game already in finale.');
+      socket.emit('error', 'Room not found, game already started, or finale already triggered.');
     }
+  });
+
+  socket.on('start_game', (code) => {
+    const room = rooms[code];
+    if (!room || room.host !== socket.id || room.started) return;
+    room.started = true;
+    io.to(code).emit('game_started', code);
+    io.to(code).emit('lobby_state', room.players);
   });
 
   socket.on('update_position', (code, data) => {
@@ -114,6 +125,7 @@ io.on('connection', (socket) => {
         delete rooms[code].players[socket.id];
         rooms[code].playersReady.delete(socket.id);
         io.to(code).emit('update_players', rooms[code].players);
+        io.to(code).emit('lobby_state', rooms[code].players);
         
         // If host left, migrate host
         if (rooms[code].host === socket.id) {
