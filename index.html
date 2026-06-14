@@ -1725,6 +1725,7 @@ function getViewW() { return window.innerWidth; }
         flashOp = 0.8; mdmg = 1.5;
         if (health <= 0) {
           alive = false;
+          triggerJumpscare();
           document.exitPointerLock();
           locked = false;
           document.getElementById('spectatorHint').style.display = 'flex';
