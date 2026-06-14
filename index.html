@@ -1236,6 +1236,7 @@ function getViewW() { return window.innerWidth; }
   function triggerJumpscare() {
     jumpscareActive = true; jumpscareT = 0;
     document.getElementById('jumpscare').style.opacity = 1;
+    document.getElementById('dead').style.display = 'none';
     document.exitPointerLock();
   }
 
@@ -1250,6 +1251,8 @@ function getViewW() { return window.innerWidth; }
   }
 
   function updateSpectator(dt) {
+    document.getElementById('jumpscare').style.opacity = 0;
+    document.getElementById('dead').style.display = 'none';
     const target = findSpectatorTarget();
     if (!target) {
       document.getElementById('spectatorHint').style.display = 'flex';
@@ -1280,7 +1283,11 @@ function getViewW() { return window.innerWidth; }
     if (jumpscareT >= dur) {
       jumpscareActive = false;
       document.getElementById('jumpscare').style.opacity = 0;
-      document.getElementById('dead').style.display = 'flex';
+      if (!alive) {
+        document.getElementById('dead').style.display = 'none';
+      } else {
+        document.getElementById('dead').style.display = 'flex';
+      }
     }
   }
 
