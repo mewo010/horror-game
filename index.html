@@ -1235,8 +1235,13 @@ function getViewW() { return window.innerWidth; }
 
   function triggerJumpscare() {
     jumpscareActive = true; jumpscareT = 0;
+    flashOp = 0;
+    document.getElementById('flash').style.opacity = 0;
     document.getElementById('jumpscare').style.opacity = 1;
     document.getElementById('dead').style.display = 'none';
+    document.getElementById('spectatorHint').style.display = 'none';
+    document.getElementById('flash').style.opacity = 0;
+    document.getElementById('flash').style.background = '#fff';
     document.exitPointerLock();
   }
 
@@ -1251,8 +1256,11 @@ function getViewW() { return window.innerWidth; }
   }
 
   function updateSpectator(dt) {
+    flashOp = 0;
+    document.getElementById('flash').style.opacity = 0;
     document.getElementById('jumpscare').style.opacity = 0;
     document.getElementById('dead').style.display = 'none';
+    document.getElementById('spectatorHint').style.display = 'flex';
     const target = findSpectatorTarget();
     if (!target) {
       document.getElementById('spectatorHint').style.display = 'flex';
@@ -1282,12 +1290,11 @@ function getViewW() { return window.innerWidth; }
     drawJumpscare(a);
     if (jumpscareT >= dur) {
       jumpscareActive = false;
+      flashOp = 0;
+      document.getElementById('flash').style.opacity = 0;
       document.getElementById('jumpscare').style.opacity = 0;
-      if (!alive) {
-        document.getElementById('dead').style.display = 'none';
-      } else {
-        document.getElementById('dead').style.display = 'flex';
-      }
+      document.getElementById('dead').style.display = 'none';
+      document.getElementById('spectatorHint').style.display = 'flex';
     }
   }
 
@@ -1794,11 +1801,15 @@ function getViewW() { return window.innerWidth; }
     if (!started) return;
     const dt = Math.min(0.05, (ts - lastT) / 1000);
     lastT = ts;
-    updateJumpscare(dt);
     if (alive) {
+      updateJumpscare(dt);
       update(dt);
     } else {
-      updateSpectator(dt);
+      if (jumpscareActive) {
+        updateJumpscare(dt);
+      } else {
+        updateSpectator(dt);
+      }
       renderer.render(scene, camera);
       requestAnimationFrame(loop);
       return;
@@ -1904,6 +1915,7 @@ function getViewW() { return window.innerWidth; }
   socket.on('error', msg => document.getElementById('lobbyStatus').innerText = msg);
 
   function startGame(statusText) {
+    document.getElementById('dead').style.display = 'none';
     document.getElementById('overlay').style.display = 'none';
     document.getElementById('questOverlay').style.opacity = 1;
     document.getElementById('entityCompass').style.display = 'flex';
@@ -1917,5 +1929,4 @@ function getViewW() { return window.innerWidth; }
   }
 
   document.getElementById('retrybtn').addEventListener('click', restartGame);
-  document.getElementById('retrybtn2').addEventListener('click', restartGame);
 </script>
