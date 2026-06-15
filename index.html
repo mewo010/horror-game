@@ -620,7 +620,8 @@
 
 <audio id="screamSound" src="scream.mp3" preload="auto"></audio>
 <audio id="walkMusic" src="walk_song.mp3" loop preload="auto"></audio>
-<audio id="chaseMusic" src="chase_song.mp3" loop preload="auto"></audio>
+<audio id="chaseMusic" src="chase_song.mp3" preload="auto"></audio>
+<audio id="voiceMessage" src="voice-message.ogg" preload="auto"></audio>
 <script src="/socket.io/socket.io.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script>
@@ -968,8 +969,27 @@
   // Simple Audio Control
   const walkAudio = document.getElementById('walkMusic');
   const chaseAudio = document.getElementById('chaseMusic');
+  const voiceMessageAudio = document.getElementById('voiceMessage');
   walkAudio.volume = 0.4;
-  chaseAudio.volume = 0;
+
+  let currentChaseSound = null;
+  const chasePlaylist = [chaseAudio, voiceMessageAudio];
+  chasePlaylist.forEach(s => s.volume = 0);
+
+  function playNextChaseSound() {
+    // Stop and reset current sound if any
+    if (currentChaseSound) {
+      currentChaseSound.pause();
+      currentChaseSound.currentTime = 0;
+    }
+    // Randomly select next sound from the playlist
+    const randomIndex = Math.floor(Math.random() * chasePlaylist.length);
+    currentChaseSound = chasePlaylist[randomIndex];
+    currentChaseSound.play().catch(() => {});
+  }
+
+  chaseAudio.addEventListener('ended', playNextChaseSound);
+  voiceMessageAudio.addEventListener('ended', playNextChaseSound);
 
   function playFootstep() {
     // Relying on walk_song.mp3 instead of individual footsteps for now, or you can add footstep.mp3 later.
@@ -978,11 +998,15 @@
     walkAudio.play().catch(()=>{});
   }
   function startChaseSound() {
-    chaseAudio.play().catch(()=>{});
+    if (!currentChaseSound) {
+      playNextChaseSound(); // Start the randomized chase sound playback if nothing is playing
+    }
   }
   function updateChaseSound(dist) {
     const targetGain = dist < 12 ? Math.min(1.0, (12 - dist) / 10) : 0;
-    chaseAudio.volume = targetGain;
+    if (currentChaseSound) {
+      currentChaseSound.volume = targetGain;
+    }
     walkAudio.volume = Math.max(0, 0.4 - targetGain);
   }
   function startRandomScreams() {}
