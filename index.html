@@ -583,6 +583,16 @@
     <h2>YOU DIED</h2>
     <p style="color:#d8c9a2;font-size:13px;letter-spacing:3px;text-align:center;max-width:320px;">You are now spectating the remaining survivors.</p>
     <button id="retrybtn" type="button">RETRY</button>
+    <button id="returnLobbyDead" type="button" style="margin-left:12px;border:1px solid #c8a830;background:none;color:#c8a830;padding:10px 28px;cursor:pointer;font-family:monospace;letter-spacing:4px;font-size:13px">RETURN TO LOBBY</button>
+  </div>
+  <div id="escaped" style="display:none;pointer-events:none;">
+    <div id="escaped-inner">
+      <h2>YOU ESCAPED</h2>
+      <div class="sublevel">LEVEL 0 — ESCAPED</div>
+      <div class="bloodline"></div>
+      <p>Congratulations — you repaired the PC and escaped the nightmare.</p>
+      <button id="returnLobbyEscaped" type="button" style="border:1px solid #30c855;background:none;color:#30c855;padding:12px 24px;font-size:14px;letter-spacing:3px;cursor:pointer;font-family:monospace;">RETURN TO LOBBY</button>
+    </div>
   </div>
   <div id="overlay">
     <h1>THE BACKROOMS</h1>
@@ -594,11 +604,12 @@
       <button id="joinbtn" class="lbtn" style="border:1px solid #c8a830;background:none;color:#c8a830;padding:12px 24px;font-size:14px;letter-spacing:5px;cursor:pointer;font-family:monospace;">JOIN LOBBY</button>
       <button id="startbtn" class="lbtn" style="display:none;border:1px solid #30c855;background:none;color:#30c855;padding:12px 24px;font-size:14px;letter-spacing:5px;cursor:pointer;font-family:monospace;">START GAME</button>
     </div>
-    <div id="lobbyStatus" style="color:#c8a830;margin-top:16px;font-size:14px;letter-spacing:3px;min-height:22px;"></div>
+    <div id="roomCodeDisplay" style="color:#ffe082;margin-top:10px;font-size:15px;letter-spacing:3px;min-height:24px;"></div>
+    <div id="lobbyStatus" style="color:#c8a830;margin-top:8px;font-size:14px;letter-spacing:3px;min-height:22px;"></div>
     <div id="lobbyPlayers" style="color:#d8c9a2;margin-top:10px;font-size:13px;letter-spacing:2px;min-height:22px;"></div>
   </div>
 </div>
-<div id="intro" aria-hidden="true">
+<div id="intro" aria-hidden="true" style="display:none;">
   <div id="intro-card">
     <h1>THE BACKROOMS</h1>
     <p>A LONG TIME AGO IN A CLASSROOM FAR, FAR AWAY...</p>
@@ -919,6 +930,8 @@
   let jsTexCanvas = null;
   let jumpscareActive = false, jumpscareT = 0;
   let pathTimer = 0, monsterPath = [], monsterWaypointIdx = 0;
+  let monsterTarget = null;
+  let targetSwitchTimer = 0;
   let mvx = 0, mvz = 0;
   let monsterSpeed = 0.032;
   let cheatGodMode = false;
@@ -1022,14 +1035,38 @@ function getViewW() { return window.innerWidth; }
     cv.width = cv.height = sz;
     const c = cv.getContext('2d');
     c.clearRect(0, 0, sz, sz);
-    c.font = 'bold 40px monospace';
+    const text = (name || 'PLAYER').toUpperCase().slice(0, 18);
+    c.font = 'bold 36px monospace';
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    c.fillStyle = 'rgba(0,0,0,0.72)';
-    c.fillRect(0, sz * 0.1, sz, sz * 0.8);
+    // Background rounded rectangle
+    const padH = 18, padV = 8;
+    const textWidth = Math.min(sz - 40, c.measureText(text).width + padH * 2);
+    const rx = (sz - textWidth) / 2;
+    const ry = sz * 0.35 - padV;
+    const rw = textWidth, rh = 40;
+    c.fillStyle = 'rgba(0,0,0,0.7)';
+    roundRect(c, rx, ry, rw, rh, 8, true, false);
+    // Glow outline
+    c.strokeStyle = 'rgba(200,168,48,0.85)';
+    c.lineWidth = 3;
+    roundRect(c, rx, ry, rw, rh, 8, false, true);
     c.fillStyle = '#ffe082';
-    c.fillText((name || 'PLAYER').toUpperCase().slice(0, 14), sz / 2, sz / 2);
+    c.fillText(text, sz / 2, sz * 0.35 + 2);
     return new THREE.CanvasTexture(cv);
+  }
+
+  function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+    if (typeof r === 'undefined') r = 5;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
   }
 
   function createPlayerModel(colorNum) {
@@ -1150,6 +1187,18 @@ function getViewW() { return window.innerWidth; }
       });
     });
 
+    // Receive authoritative piece spawn positions from host
+    socket.on('piece_positions', (positions) => {
+      positions.forEach((pos, i) => {
+        if (piecesMeshes[i]) {
+          piecesMeshes[i].position.set(pos.x, 0, pos.z);
+          piecesMeshes[i].userData.active = true;
+          piecesMeshes[i].visible = true;
+          piecesMeshes[i].userData.light.intensity = 0.8;
+        }
+      });
+    });
+
     socket.on('trigger_finale', () => { if(alive && started) triggerFinale(); });
     socket.on('pc_waiting', (ready, total) => {
       document.getElementById('interact').innerText = `Waiting for players (${ready}/${total})`;
@@ -1182,7 +1231,7 @@ function getViewW() { return window.innerWidth; }
     const wallMat = new THREE.MeshLambertMaterial({ map: wallTex });
     const floorMat = new THREE.MeshLambertMaterial({ map: floorTex });
     const ceilMat = new THREE.MeshLambertMaterial({ map: ceilTex });
-    const wg = new THREE.BoxGeometry(1, 1, 1);
+    const wg = new THREE.BoxGeometry(1, 2, 1);
 
     const pieceGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
     const pieceMat = new THREE.MeshPhongMaterial({ color: 0x4488ff, emissive: 0x113388 });
@@ -1222,7 +1271,7 @@ function getViewW() { return window.innerWidth; }
       const c = MAP[z]?.[x];
       if (c === '#') {
         const m = new THREE.Mesh(wg, wallMat);
-        m.position.set(x + 0.5, 0.5, z + 0.5);
+        m.position.set(x + 0.5, 1.0, z + 0.5);
         m.castShadow = true;
         m.receiveShadow = true;
         scene.add(m);
@@ -1251,7 +1300,7 @@ function getViewW() { return window.innerWidth; }
     }
     const pg = new THREE.PlaneGeometry(MW, MH);
     const fl = new THREE.Mesh(pg, floorMat); fl.rotation.x = -Math.PI / 2; fl.position.set(MW / 2, 0, MH / 2); fl.receiveShadow = true; scene.add(fl);
-    const cl = new THREE.Mesh(pg, ceilMat); cl.rotation.x = Math.PI / 2; cl.position.set(MW / 2, 1, MH / 2); cl.receiveShadow = true; scene.add(cl);
+    const cl = new THREE.Mesh(pg, ceilMat); cl.rotation.x = Math.PI / 2; cl.position.set(MW / 2, 2, MH / 2); cl.receiveShadow = true; scene.add(cl);
     scene.add(new THREE.AmbientLight(0x5a3800, 0.45));
     for (let z = 2; z < MH; z += 5)for (let x = 2; x < MW; x += 5) {
       if (!isWall(x, z)) { const l = new THREE.PointLight(0xffe060, 1.1, 8); l.position.set(x + 0.5, 0.9, z + 0.5); scene.add(l); pointLights.push(l); }
@@ -1708,8 +1757,8 @@ function getViewW() { return window.innerWidth; }
     flickT += dt;
     pointLights.forEach((l, i) => { l.intensity = (0.8 + Math.sin(flickT * 2.1 + i * 1.3) * 0.18 + Math.sin(flickT * 9 + i) * 0.09) * (Math.random() < 0.005 ? 0.08 : 1); });
 
-    const canSprint = (keys['ShiftLeft'] || keys['ShiftRight']) && stamina > 0;
-    const sprint = canSprint;
+    const canSprintKey = (keys['ShiftLeft'] || keys['ShiftRight']);
+    const sprint = canSprintKey && stamina > 0.05; // require positive stamina
     let spd = sprint ? 0.055 : 0.030;
     if (cheatSpeed) spd *= 5;
     if (sprint) stamina = Math.max(0, stamina - 16 * dt);
@@ -1777,12 +1826,37 @@ function getViewW() { return window.innerWidth; }
       }
     }
 
-    // BFS pathfinding - recalculate every 0.3s
+    // BFS pathfinding & host-driven monster targeting
     if (malerted && myRole === "host") {
       pathTimer -= dt;
+      targetSwitchTimer -= dt;
       if (pathTimer <= 0) {
         pathTimer = 0.3;
-        monsterPath = bfsPath(mx, mz, px, pz);
+
+        // Ensure we have a valid target; pick randomly among alive players periodically
+        const pickCandidates = () => {
+          const list = [];
+          if (alive) list.push({ id: '__local', x: px, z: pz });
+          for (const id in otherPlayers) {
+            const p = otherPlayers[id];
+            if (p && p.alive) list.push({ id, x: p.x, z: p.z });
+          }
+          return list;
+        };
+
+        if (!monsterTarget || targetSwitchTimer <= 0) {
+          const cand = pickCandidates();
+          if (cand.length > 0) {
+            monsterTarget = cand[Math.floor(Math.random() * cand.length)];
+            targetSwitchTimer = 6 + Math.random() * 8; // 6-14s until next switch
+          }
+        }
+
+        // Compute path toward current monster target (fallback to local player)
+        const tx = monsterTarget ? monsterTarget.x : px;
+        const tz = monsterTarget ? monsterTarget.z : pz;
+        monsterPath = bfsPath(mx, mz, tx, tz);
+
         // Look-ahead shortcut: skip to farthest cell we can see directly
         monsterWaypointIdx = 0;
         for (let i = monsterPath.length - 1; i > 0; i--) {
@@ -1794,19 +1868,18 @@ function getViewW() { return window.innerWidth; }
         }
       }
 
-        const nearest = findNearestSurvivor();
-
-      // Determine steering target
+      // Determine steering target (waypoint or direct target if no path)
       let targetX, targetZ;
-      if (!nearest || dist < 1.5 || monsterPath.length === 0) {
-        targetX = nearest ? nearest.x : px;
-        targetZ = nearest ? nearest.z : pz;
+      if (monsterPath.length === 0) {
+        targetX = monsterTarget ? monsterTarget.x : px;
+        targetZ = monsterTarget ? monsterTarget.z : pz;
       } else {
-        // Aim at current waypoint, advance if close enough
         const wp = monsterPath[monsterWaypointIdx];
         targetX = wp[0] + 0.5; targetZ = wp[1] + 0.5;
         if (Math.hypot(mx - targetX, mz - targetZ) < 0.3) {
           monsterWaypointIdx = Math.min(monsterWaypointIdx + 1, monsterPath.length - 1);
+          // if we reached final waypoint, nudge target switch soon
+          if (monsterWaypointIdx === monsterPath.length - 1) targetSwitchTimer = Math.min(targetSwitchTimer, 1.0);
         }
       }
 
@@ -1995,14 +2068,16 @@ function getViewW() { return window.innerWidth; }
 
   
   document.getElementById('hostbtn').addEventListener('click', () => {
-    playerName = (document.getElementById('playerName').value || 'PLAYER').trim().slice(0, 18) || 'PLAYER';
+    playerName = (document.getElementById('playerName').value || '').trim().slice(0, 18);
+    if (!playerName) { document.getElementById('lobbyStatus').innerText = 'ENTER A NAME TO HOST'; return; }
     localStorage.setItem('playerName', playerName);
     socket.emit('create_room', playerName);
     document.getElementById('lobbyStatus').innerText = 'WAITING FOR PLAYERS...';
     document.getElementById('startbtn').style.display = 'inline-block';
   });
   document.getElementById('joinbtn').addEventListener('click', () => {
-    playerName = (document.getElementById('playerName').value || 'PLAYER').trim().slice(0, 18) || 'PLAYER';
+    playerName = (document.getElementById('playerName').value || '').trim().slice(0, 18);
+    if (!playerName) { document.getElementById('lobbyStatus').innerText = 'ENTER A NAME TO JOIN'; return; }
     localStorage.setItem('playerName', playerName);
     const code = document.getElementById('joinCode').value.toUpperCase();
     if(code.length === 4) {
@@ -2014,6 +2089,12 @@ function getViewW() { return window.innerWidth; }
   });
   document.getElementById('startbtn').addEventListener('click', () => {
     if (!roomCode) return;
+    const playersText = document.getElementById('lobbyPlayers').innerText || '';
+    const playersCount = playersText ? playersText.split(' • ').length : 0;
+    if (playersCount < 2) {
+      document.getElementById('lobbyStatus').innerText = 'Need at least 2 players to start';
+      return;
+    }
     socket.emit('start_game', roomCode);
     document.getElementById('lobbyStatus').innerText = 'STARTING GAME...';
   });
@@ -2031,26 +2112,137 @@ function getViewW() { return window.innerWidth; }
   });
   socket.on('game_started', code => {
     if (roomCode !== code) roomCode = code;
-    startGame('ROOM CODE: ' + code);
+    const introEl = document.getElementById('intro');
+    // Show story intro only for clients who joined (not the host)
+    if (myRole === 'client') {
+      introEl.style.display = 'flex';
+    }
+
+    // Host computes accessible piece spawn positions and notifies clients
+    if (myRole === 'host') {
+      const candidates = [];
+      for (let z = 0; z < MH; z++) for (let x = 0; x < MW; x++) {
+        if (MAP[z]?.[x] === '.') {
+          let open = 0;
+          [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dz]) => { if (!isWall(x + 0.5 + dx, z + 0.5 + dz)) open++; });
+          if (open >= 2) candidates.push({ x: x + 0.5, z: z + 0.5 });
+        }
+      }
+
+      const pickPositions = (n) => {
+        const picks = [];
+        let tries = 0;
+        while (picks.length < n && tries < 2000 && candidates.length > 0) {
+          tries++;
+          const idx = Math.floor(Math.random() * candidates.length);
+          const c = candidates[idx];
+          if (picks.some(p => Math.hypot(p.x - c.x, p.z - c.z) < 4)) continue;
+          if (Math.hypot(c.x - 1.5, c.z - 1.5) < 5) continue;
+          picks.push(c);
+        }
+        if (picks.length < n) {
+          for (let z = 0; z < MH && picks.length < n; z++) for (let x = 0; x < MW && picks.length < n; x++) {
+            if (MAP[z]?.[x] === 'C') picks.push({ x: x + 0.5, z: z + 0.5 });
+          }
+        }
+        return picks.slice(0, n);
+      };
+
+      const positions = pickPositions(4);
+      socket.emit('set_piece_positions', roomCode, positions);
+    }
+
+    // Start game after intro for clients, or immediately for host
+    const startAfterIntro = () => {
+      if (started) return;
+      const ic = document.getElementById('intro-card');
+      ic && ic.removeEventListener('animationend', startAfterIntro);
+      introEl.style.display = 'none';
+      startGame('ROOM CODE: ' + code);
+    };
+    if (myRole === 'client') {
+      const ic = document.getElementById('intro-card');
+      if (ic) {
+        ic.style.animation = 'none';
+        void ic.offsetWidth;
+        ic.style.animation = 'introFade 6.6s ease forwards';
+        ic.addEventListener('animationend', startAfterIntro);
+      }
+      introEl.style.display = 'flex';
+      // Fallback in case animationend doesn't fire
+      setTimeout(() => { if (!started) { introEl.style.display = 'none'; startAfterIntro(); } }, 7600);
+    } else {
+      // Host starts immediately
+      startGame('ROOM CODE: ' + code);
+    }
   });
   socket.on('lobby_state', (players) => {
-    const list = Object.values(players).map(p => `${p.name || 'PLAYER'}${p.id === socket.id ? ' (YOU)' : ''}`).join(' • ');
+    const arr = Object.values(players);
+    const list = arr.map(p => `${p.name || 'PLAYER'}${p.id === socket.id ? ' (YOU)' : ''}`).join(' • ');
     document.getElementById('lobbyPlayers').innerText = list || 'No players yet';
+    const count = arr.length;
+    const roomCodeText = roomCode ? `ROOM CODE: ${roomCode}` : '';
+    document.getElementById('roomCodeDisplay').innerText = roomCodeText;
+    if (myRole === 'host') {
+      // show waiting message and enable start only when >=2 players
+      document.getElementById('lobbyStatus').innerText = count >= 2 ? `Players: ${count} — ready to start` : `Waiting for players... (${count}/2)`;
+      document.getElementById('startbtn').style.display = count >= 2 ? 'inline-block' : 'none';
+    } else {
+      document.getElementById('lobbyStatus').innerText = roomCodeText ? `Room code: ${roomCode}` : 'Waiting for host to start...';
+      document.getElementById('startbtn').style.display = 'none';
+    }
   });
   socket.on('error', msg => document.getElementById('lobbyStatus').innerText = msg);
 
+  function returnToLobby() {
+    // Reset local state and show overlay so player can host/join again
+    started = false; alive = true; piecesCollected = 0;
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('questOverlay').style.opacity = 0;
+    document.getElementById('entityCompass').style.display = 'none';
+    document.getElementById('dead').style.display = 'none';
+    document.getElementById('escaped').style.display = 'none';
+    document.getElementById('spectatorHint').style.display = 'none';
+    // Dispose renderer if present
+    try { if (renderer && renderer.domElement) renderer.domElement.remove(); } catch (e) {}
+    renderer = null; scene = null; monsterMesh = null; monsterGlow = null;
+    // Notify server we left the room
+    if (roomCode) {
+      socket.emit('leave_room', roomCode);
+      roomCode = null;
+    }
+    document.getElementById('lobbyStatus').innerText = '';
+  }
+
+  document.getElementById('returnLobbyDead')?.addEventListener('click', returnToLobby);
+  document.getElementById('returnLobbyEscaped')?.addEventListener('click', returnToLobby);
+
+  // Initial splash: show intro briefly before main menu appears
+  // Do not auto-show intro on page load; intro will play when joining a game
+
   function startGame(statusText) {
     document.getElementById('dead').style.display = 'none';
-    document.getElementById('overlay').style.display = 'none';
     document.getElementById('questOverlay').style.opacity = 1;
     document.getElementById('entityCompass').style.display = 'flex';
     document.getElementById('lockbanner').innerText = statusText + " - CLICK TO LOCK MOUSE";
-    initScene(); setupControls(); started = true;
-    lastT = performance.now();
-    requestAnimationFrame(loop);
-    setTimeout(() => document.getElementById('gc').requestPointerLock(), 200);
-    startAmbientDrone();
-    startRandomScreams();
+    // Try initializing scene; on error, show overlay and surface message instead of black screen
+    try {
+      document.getElementById('overlay').style.display = 'none';
+      initScene(); setupControls(); started = true;
+      lastT = performance.now();
+      requestAnimationFrame(loop);
+      setTimeout(() => document.getElementById('gc').requestPointerLock(), 200);
+      startAmbientDrone();
+      startRandomScreams();
+    } catch (err) {
+      console.error('Failed to start game:', err);
+      // reveal overlay and show error to the player
+      const ov = document.getElementById('overlay');
+      ov.style.display = 'flex';
+      document.getElementById('lobbyStatus').innerText = 'Error starting game: ' + (err && err.message ? err.message : String(err));
+      // rethrow in dev console if needed
+      throw err;
+    }
   }
 
   document.getElementById('retrybtn').addEventListener('click', restartGame);

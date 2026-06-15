@@ -70,6 +70,15 @@ io.on('connection', (socket) => {
     io.to(code).emit('lobby_state', room.players);
   });
 
+  // Host may set piece spawn positions and broadcast them to the room
+  socket.on('set_piece_positions', (code, positions) => {
+    const room = rooms[code];
+    if (room && room.host === socket.id) {
+      room.piecePositions = positions;
+      io.to(code).emit('piece_positions', positions);
+    }
+  });
+
   socket.on('update_position', (code, data) => {
     if (rooms[code] && rooms[code].players[socket.id]) {
       const room = rooms[code];
@@ -136,6 +145,29 @@ io.on('connection', (socket) => {
           } else {
             delete rooms[code];
           }
+        }
+      }
+    }
+  });
+
+  socket.on('leave_room', (code) => {
+    const room = rooms[code];
+    if (!room) return;
+    if (room.players[socket.id]) {
+      delete room.players[socket.id];
+      room.playersReady.delete(socket.id);
+      socket.leave(code);
+      io.to(code).emit('update_players', room.players);
+      io.to(code).emit('lobby_state', room.players);
+
+      // If host left, migrate host
+      if (room.host === socket.id) {
+        const remaining = Object.keys(room.players);
+        if (remaining.length > 0) {
+          room.host = remaining[0];
+          io.to(room.host).emit('role', 'host');
+        } else {
+          delete rooms[code];
         }
       }
     }
